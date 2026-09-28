@@ -1,0 +1,19 @@
+# Run from this project directory: conda env create -f environment.yml
+# USB drivers are installed separately by the operating system.
+name: wifi-hackrf
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - numpy>=1.24
+  - matplotlib>=3.7
+  - pyyaml>=6
+  - pytest>=7
+  - pip
+  - setuptools>=68
+  - wheel
+  # Use with HackRF One firmware 2024.02.1; no firmware flashing is performed.
+  - hackrf=2024.02.1
+  - pip:
+      - -e .

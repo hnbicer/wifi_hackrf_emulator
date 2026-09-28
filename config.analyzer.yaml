@@ -1,0 +1,19 @@
+# Diagnostic packet train for a swept spectrum analyzer, not the normal traffic model.
+# Run: python scripts/random_traffic.py --config config.analyzer.yaml --transmit --verbose
+# Without --transmit this remains a dry run.
+experiment:
+  duration_seconds: 30
+  seed: 12345
+
+hackrf:
+  tx_gain_db: 0
+  rf_amp_enabled: false
+
+traffic:
+  mode: random
+  channels: [6]
+  idle_ms: {min: 100, max: 100}
+  packet_count: {min: 50, max: 50}
+  packet_duration_us: {min: 1000, max: 1000}
+  inter_packet_gap_us: {min: 100, max: 100}
+  burst_duration_ms: {min: 50, max: 60}

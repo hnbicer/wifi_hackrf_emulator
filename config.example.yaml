@@ -1,0 +1,35 @@
+# CLI arguments override these values. RF transmission requires --transmit.
+experiment:
+  duration_seconds: 60
+  seed: 12345
+  output_dir: results
+
+hackrf:
+  sample_rate: 20000000
+  tx_gain_db: 0
+  rf_amp_enabled: false
+  transfer_timeout_seconds: 30
+
+signal:
+  digital_amplitude: 0.6
+  fft_size: 64
+  cyclic_prefix: 16
+  modulation: qpsk
+  ramp_us: 3
+
+traffic:
+  mode: poisson
+  lambda_events_per_second: 20
+  channels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+  channel_mode: uniform
+  # In weighted mode, omitted channels have weight zero. Weights are normalized.
+  channel_weights: {}
+  # Example: channel_weights: {1: 0.3, 6: 0.4, 11: 0.3}
+  idle_ms: {min: 5, max: 100}
+  packet_count: {min: 1, max: 10}
+  packet_duration_us: {min: 50, max: 2000}
+  inter_packet_gap_us: {min: 20, max: 500}
+  # Applied to total waveform length, including silence and symbol rounding.
+  # Memory limits: burst max <=1000 ms, packet count <=10000, and individual
+  # packet/gap maximums <=1000000 us. Typical experiments should stay much lower.
+  burst_duration_ms: {min: 0.2, max: 10}

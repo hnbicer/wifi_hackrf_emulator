@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wifi-hackrf-emulator"
+version = "0.1.0"
+description = "Temporary-IQ Wi-Fi-like OFDM traffic for FPGA occupancy detector testing"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "PyYAML>=6", "matplotlib>=3.7"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+wifi-random-traffic = "wifi_emulator.cli:random_main"
+wifi-transmit-single = "wifi_emulator.cli:single_main"
+wifi-inspect-waveform = "wifi_emulator.cli:inspect_main"
+wifi-check-hackrf = "wifi_emulator.cli:check_main"
+
+[tool.setuptools.packages.find]
+include = ["wifi_emulator*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

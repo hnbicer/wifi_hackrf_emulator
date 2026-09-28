@@ -1,0 +1,51 @@
+# Python bytecode and packaging artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Local Python/Conda environments (keep environment.yml)
+.venv/
+venv/
+env/
+.conda/
+
+# Test, analysis, and editor caches
+.pytest_cache/
+.pytest-temp*/
+.pytest_tmp*/
+.test-tmp*/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.mplconfig/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.vscode/
+.idea/
+
+# Experiment records stay local
+results/
+*.log
+
+# Generated or exported waveform data must never enter version control
+*.cs8
+*.iq
+*.bin
+*.npy
+*.npz
+*.dat
+
+# Local credentials and OS files
+.env
+.env.*
+!.env.example
+Thumbs.db
+Desktop.ini
+.DS_Store
