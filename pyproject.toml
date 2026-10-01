@@ -17,6 +17,7 @@ wifi-random-traffic = "wifi_emulator.cli:random_main"
 wifi-transmit-single = "wifi_emulator.cli:single_main"
 wifi-inspect-waveform = "wifi_emulator.cli:inspect_main"
 wifi-check-hackrf = "wifi_emulator.cli:check_main"
+wifi-continuous-traffic = "wifi_emulator.continuous:continuous_main"
 
 [tool.setuptools.packages.find]
 include = ["wifi_emulator*"]

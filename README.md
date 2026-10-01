@@ -6,9 +6,10 @@ detector. This is a simplified energy source, not an access point or an IEEE
 
 The project lives directly in this folder. Generated IQ lives in RAM; transmission
 uses a temporary signed-int8 I/Q file in the operating system's temporary directory
-and removes it after the child process stops. There is no waveform cache or IQ
-export option. Normal experiments retain only configuration, ground truth, and
-summary statistics.
+and removes it after the child process stops. Continuous mode repeats that file
+for one session. There is no persistent waveform cache or IQ export option.
+Experiments retain only configuration, ground truth where applicable, and summary
+statistics.
 
 ## Requirements and installation
 
@@ -84,7 +85,8 @@ changes.
 On Linux/macOS, use `python3 -m venv .venv`, then `.venv/bin/python` in place of the
 Windows interpreter path. After activating an environment, `python` works in the
 examples below. Installation also provides `wifi-check-hackrf`,
-`wifi-inspect-waveform`, `wifi-transmit-single`, and `wifi-random-traffic` commands.
+`wifi-inspect-waveform`, `wifi-transmit-single`, `wifi-random-traffic`, and
+`wifi-continuous-traffic` commands.
 
 ## Device check and waveform inspection
 
@@ -123,7 +125,8 @@ experiment deadline, so total runtime may exceed the requested duration.
 RF transmissions must comply with applicable regulations. Prefer a shielded setup,
 conducted connections with suitable attenuators, or an RF enclosure. Availability
 of channels 12 and 13 and allowed operating conditions vary by location. Use gain
-0 initially; the RF amplifier and antenna-port power remain disabled.
+0 initially. Single-burst and random-traffic runs keep the RF amplifier off;
+continuous mode can explicitly enable it. Antenna-port power remains disabled.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/transmit_single.py --channel 6 --duration-ms 5 --gain 0 --transmit
@@ -140,6 +143,58 @@ Only one center frequency is transmitted at a time. Channels 1–13 map to
 selection is not restricted to channels 1, 6, and 11. Each burst starts a new
 `hackrf_transfer` invocation, which retunes to that event's center frequency.
 The runner stops and preserves partial logs on a backend failure.
+
+### Interactive continuous packet train
+
+Start the menu in dry-run mode, or explicitly enable RF transmission:
+
+```text
+python scripts/continuous_traffic.py
+python scripts/continuous_traffic.py --transmit
+```
+
+Choose channel 1–13, TX gain 0–47 dB, digital amplitude greater than 0 and at most
+1, RF amplifier on/off, packet duration, inter-packet gap, packets per repeating
+loop, and run duration. Menu item 8 sets the RF amplifier; it defaults to off.
+Start with gain 0 in the shielded or conducted setup described above. Packet
+duration must be at least 20 us and rounds up to a 4 us OFDM symbol boundary.
+The gap also appears between the last packet and the first packet of the next
+loop. A duration of 0 runs until Ctrl+C; Ctrl+C stops the session and returns to
+the menu so you can change settings and start again. Changing channel or gain
+requires stopping and restarting, as does changing the RF amplifier.
+
+You can initialize settings from the command line:
+
+```text
+python scripts/continuous_traffic.py --transmit --channel 6 --gain 0 --packet-us 1000 --gap-us 100 --packet-count 50 --duration 0
+```
+
+For the maximum selectable TX controls, initialize the menu with:
+
+```text
+python scripts/continuous_traffic.py --transmit --channel 6 --gain 47 --digital-amplitude 1 --rf-amp
+```
+
+Select **1 Start** to transmit, and Ctrl+C to stop. The RF amplifier is a separate
+on/off gain stage; `--rf-amp` maps to `hackrf_transfer -a 1`. Its nominal gain is
+about 11 dB and varies with frequency. Maximum controls can introduce distortion
+and do not specify output power in dBm. See the
+[official HackRF gain documentation](https://hackrf.readthedocs.io/en/latest/setting_gain.html).
+
+Other options include `--digital-amplitude`, `--seed`, `--output-dir`, and
+`--verbose`. Use `--help` for all options. Dry-run sessions never access HackRF.
+RF mode generates one loop and runs one `hackrf_transfer` process with
+[`-R` repeat mode](https://github.com/greatscottgadgets/hackrf/blob/v2024.02.1/host/hackrf-tools/src/hackrf_transfer.c#L523-L553),
+repeating the same packet data until stopped. It avoids the subprocess startup
+gaps of the random-traffic runner; it still includes the configured packet gaps.
+USB underruns can interrupt delivery, so continuous RF output depends on the
+host and USB connection. These are the project's Wi-Fi-like OFDM packets, not
+IEEE 802.11-compliant traffic that Wi-Fi clients can decode.
+
+Each session saves its resolved configuration and `continuous_summary.json`
+under the output directory. The summary describes host timing and session
+outcome; it does not certify RF delivery or count packets received over the air.
+The temporary repeating IQ file is removed after the child process stops.
 
 ### Missing short bursts on a spectrum analyzer
 

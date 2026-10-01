@@ -125,8 +125,36 @@ def _stop_and_reap(process: subprocess.Popen[str]) -> tuple[str, str]:
             process.wait()
 
 
+def _stop_repeating_and_reap(process: subprocess.Popen[str]) -> None:
+    """Stop a child whose output goes to files, then release its IQ input."""
+    try:
+        process.terminate()
+    except OSError:
+        # It may have exited between the last poll and terminate.
+        pass
+    try:
+        process.wait(timeout=2.0)
+    except BaseException:
+        # A second interrupt or an unresponsive child must not leave RF active.
+        try:
+            if process.poll() is None:
+                process.kill()
+        except OSError:
+            if process.poll() is None:
+                raise
+        process.wait()
+
+
+def _output_tail(stream, limit: int = 8192) -> str:
+    """Read a bounded UTF-8 tail from a disk-backed child output stream."""
+    stream.seek(0, os.SEEK_END)
+    length = stream.tell()
+    stream.seek(max(0, length - limit))
+    return stream.read(limit).decode("utf-8", errors="replace")
+
+
 class HackRFTransferBackend(TransmitterBackend):
-    """Launch hackrf_transfer once per burst with RF amplification disabled."""
+    """Launch finite bursts or repeating sessions with RF amplification off by default."""
 
     def __init__(self, timeout_seconds: float = 30.0, verbose: bool = False):
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -273,6 +301,135 @@ class HackRFTransferBackend(TransmitterBackend):
                                       time.perf_counter() - start_clock if start_clock is not None else 0.0),
                 return_code=return_code,
                 success=error is None and return_code == 0,
+                stdout=concise(stdout),
+                stderr=concise(stderr),
+                error=concise(error) if error is not None else None,
+            )
+            if self.verbose:
+                if self.last_result.stdout:
+                    print(self.last_result.stdout, file=sys.stderr)
+                if self.last_result.stderr:
+                    print(self.last_result.stderr, file=sys.stderr)
+        return self.last_result
+
+    def transmit_repeating(
+        self,
+        iq: np.ndarray,
+        frequency_hz: int,
+        sample_rate: int = 20_000_000,
+        gain_db: int = 0,
+        digital_amplitude: float = 0.6,
+        duration_seconds: float = 0,
+        rf_amp_enabled: bool = False,
+    ) -> TransmissionResult:
+        """Repeat a temporary IQ file until interrupted or a duration elapses.
+
+        A zero duration waits indefinitely. A positive duration stops the child
+        and returns host success when shutdown completes, preserving its actual
+        exit code. An early child exit is a failure, including exit code zero.
+        Interrupts propagate after cleanup with last_result available. The
+        finite-burst timeout only applies to the device preflight in this mode.
+
+        Output is captured on disk while running and only its final 8192-byte
+        tails are retained in memory. RF amplification is disabled by default
+        and can be explicitly enabled for this repeating session. Antenna-port
+        power remains disabled.
+        """
+        start_timestamp = ""
+        start_clock: float | None = None
+        end_timestamp: str | None = None
+        elapsed: float | None = None
+        process: subprocess.Popen[str] | None = None
+        temp_path: Path | None = None
+        stdout = stderr = ""
+        error: str | None = None
+        return_code: int | None = None
+        duration_elapsed = False
+        stop_requested = False
+        try:
+            if not isinstance(rf_amp_enabled, bool):
+                raise ValueError("rf_amp_enabled must be a boolean")
+            if isinstance(frequency_hz, bool) or int(frequency_hz) != frequency_hz or not 0 <= frequency_hz <= 7_250_000_000:
+                raise ValueError("frequency_hz must be an integer from 0 to 7250000000")
+            if sample_rate != 20_000_000:
+                raise ValueError("The Wi-Fi-like backend requires a 20000000 sample/s rate")
+            if isinstance(gain_db, bool) or int(gain_db) != gain_db or not 0 <= gain_db <= 47:
+                raise ValueError("gain_db must be an integer from 0 to 47")
+            if isinstance(duration_seconds, bool) or not math.isfinite(duration_seconds) or duration_seconds < 0:
+                raise ValueError("duration_seconds must be finite and nonnegative; 0 means until interrupted")
+            interleaved = quantize_iq(iq, digital_amplitude)
+            if interleaved.size == 0:
+                raise ValueError("Cannot transmit an empty waveform")
+            if self._transfer_executable is None:
+                self.check_available()
+            executable = self._transfer_executable
+            with tempfile.TemporaryDirectory(prefix="wifi_hackrf_repeat_") as temporary_directory:
+                temp_path = Path(temporary_directory) / "repeat.cs8"
+                temp_path.write_bytes(interleaved.tobytes())
+                command = [
+                    executable,
+                    "-t", str(temp_path),
+                    "-f", str(int(frequency_hz)),
+                    "-s", str(sample_rate),
+                    "-x", str(int(gain_db)),
+                    "-a", str(int(rf_amp_enabled)),
+                    "-p", "0",
+                    "-b", "20000000",
+                    "-R",
+                ]
+                # A live repeat can produce output for hours. File handles avoid
+                # pipe backpressure and communicate() accumulating it in RAM.
+                with tempfile.TemporaryFile(mode="w+b", dir=temporary_directory) as stdout_file, \
+                        tempfile.TemporaryFile(mode="w+b", dir=temporary_directory) as stderr_file:
+                    start_timestamp = _utc_now()
+                    start_clock = time.perf_counter()
+                    try:
+                        process = subprocess.Popen(
+                            command,
+                            stdin=subprocess.DEVNULL,
+                            stdout=stdout_file,
+                            stderr=stderr_file,
+                            text=True,
+                            errors="replace",
+                            shell=False,
+                        )
+                        try:
+                            process.wait(timeout=float(duration_seconds) if duration_seconds else None)
+                        except subprocess.TimeoutExpired:
+                            duration_elapsed = True
+                    finally:
+                        try:
+                            if process is not None:
+                                if process.poll() is None:
+                                    stop_requested = duration_elapsed
+                                    _stop_repeating_and_reap(process)
+                                return_code = process.returncode
+                        finally:
+                            end_timestamp = _utc_now()
+                            elapsed = time.perf_counter() - start_clock
+                            stdout = _output_tail(stdout_file)
+                            stderr = _output_tail(stderr_file)
+                if not (duration_elapsed and stop_requested):
+                    error = f"hackrf_transfer exited unexpectedly with code {return_code} while repeating"
+        except BaseException as exc:
+            error = f"{type(exc).__name__}: {exc}".rstrip(": ")
+            if not isinstance(exc, Exception):
+                raise
+        finally:
+            def concise(value: str | bytes | None) -> str:
+                result = _text(value)
+                if temp_path is not None:
+                    result = result.replace(str(temp_path), "<temporary IQ>")
+                    result = result.replace(str(temp_path.parent), "<temporary directory>")
+                return result[-8192:]
+
+            self.last_result = TransmissionResult(
+                host_start_timestamp=start_timestamp,
+                host_end_timestamp=end_timestamp or (_utc_now() if start_timestamp else ""),
+                host_elapsed_seconds=(elapsed if elapsed is not None else
+                                      time.perf_counter() - start_clock if start_clock is not None else 0.0),
+                return_code=return_code,
+                success=error is None and duration_elapsed and stop_requested and return_code is not None,
                 stdout=concise(stdout),
                 stderr=concise(stderr),
                 error=concise(error) if error is not None else None,
