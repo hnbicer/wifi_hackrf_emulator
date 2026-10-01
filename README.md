@@ -11,6 +11,10 @@ for one session. There is no persistent waveform cache or IQ export option.
 Experiments retain only configuration, ground truth where applicable, and summary
 statistics.
 
+For a fixed channel that runs until you stop it, see the
+[continuous transmission menu instructions](#interactive-continuous-packet-train).
+They include the menu controls and a command for maximum selectable TX settings.
+
 ## Requirements and installation
 
 - Python 3.10 or newer, NumPy, PyYAML and Matplotlib. GNU Radio is not required.
@@ -146,40 +150,93 @@ The runner stops and preserves partial logs on a backend failure.
 
 ### Interactive continuous packet train
 
-Start the menu in dry-run mode, or explicitly enable RF transmission:
+Run from the project directory after installing the environment above. On Windows
+PowerShell with this repo's `.venv`, check the device and open the RF menu:
 
-```text
-python scripts/continuous_traffic.py
-python scripts/continuous_traffic.py --transmit
+```powershell
+cd C:\wifi_hackrf_emulator
+.\.venv\Scripts\python.exe scripts/check_hackrf.py
+.\.venv\Scripts\python.exe scripts/continuous_traffic.py --transmit --duration 0
 ```
 
-Choose channel 1–13, TX gain 0–47 dB, digital amplitude greater than 0 and at most
-1, RF amplifier on/off, packet duration, inter-packet gap, packets per repeating
-loop, and run duration. Menu item 8 sets the RF amplifier; it defaults to off.
-Start with gain 0 in the shielded or conducted setup described above. Packet
-duration must be at least 20 us and rounds up to a 4 us OFDM symbol boundary.
-The gap also appears between the last packet and the first packet of the next
-loop. A duration of 0 runs until Ctrl+C; Ctrl+C stops the session and returns to
-the menu so you can change settings and start again. Changing channel or gain
-requires stopping and restarting, as does changing the RF amplifier.
-
-You can initialize settings from the command line:
+With Anaconda/Miniconda, use the activated environment instead:
 
 ```text
-python scripts/continuous_traffic.py --transmit --channel 6 --gain 0 --packet-us 1000 --gap-us 100 --packet-count 50 --duration 0
+conda activate wifi-hackrf
+python scripts/check_hackrf.py
+python scripts/continuous_traffic.py --transmit --duration 0
 ```
 
-For the maximum selectable TX controls, initialize the menu with:
+**Opening the menu does not start transmission. Select `1` to start.**
+To select your channel first, enter `2`, enter a channel from `1` to `13`, then
+enter `1` when the menu returns. Start with gain 0 in the shielded or conducted
+setup described above.
+
+| Menu item | Control | Default / accepted values |
+| --- | --- | --- |
+| `1` | Start the packet train | Uses the displayed settings |
+| `2` | Channel | Default `6`; accepts `1`–`13` |
+| `3` | TX gain | Default `0`; accepts `0`–`47` dB |
+| `4` | Digital amplitude | Default `0.6`; greater than `0`, at most `1` |
+| `5` | Packet timing | Prompts for packet us, gap us, then packets per loop; defaults `1000`, `100`, `50` |
+| `6` | Run duration | Default `0` = until Ctrl+C; positive values are seconds |
+| `7` | Waveform seed | Default `0`; nonnegative integer |
+| `8` | RF amplifier | Default `0` = off; enter `1` for on |
+| `0` | Exit | Available when the menu is waiting for input |
+
+While a session is running, press **Ctrl+C** to stop and return to the menu.
+You can then change the channel, gain, AMP, or other settings and select `1`
+again. To quit while transmitting, press Ctrl+C, then enter `0` at the menu.
+After a timed session finishes, enter `0` directly. Ctrl+C at the idle menu also
+exits; during an edit it cancels the edit. A blank setting prompt keeps its
+current value, and invalid edits retain the previous settings.
+
+For a hardware-free dry run, omit `--transmit`:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/continuous_traffic.py
+```
+
+Dry-run mode cannot be changed into RF mode through the menu; close it and
+relaunch with `--transmit`. Selecting AMP on in a dry run does not access HackRF.
+
+You can initialize any settings from the command line. For example, a 10-second
+session on channel 6 with 1 ms packets and 100 us gaps:
 
 ```text
-python scripts/continuous_traffic.py --transmit --channel 6 --gain 47 --digital-amplitude 1 --rf-amp
+python scripts/continuous_traffic.py --transmit --channel 6 --gain 0 --packet-us 1000 --gap-us 100 --packet-count 50 --duration 10
 ```
 
-Select **1 Start** to transmit, and Ctrl+C to stop. The RF amplifier is a separate
-on/off gain stage; `--rf-amp` maps to `hackrf_transfer -a 1`. Its nominal gain is
-about 11 dB and varies with frequency. Maximum controls can introduce distortion
-and do not specify output power in dBm. See the
+#### Maximum selectable TX settings
+
+This command selects TX gain **47 dB**, digital amplitude **1**, and **RF AMP on**:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/continuous_traffic.py --transmit --channel 6 --gain 47 --digital-amplitude 1 --rf-amp --duration 0
+```
+
+With the activated Conda environment, use `python` in place of
+`.\.venv\Scripts\python.exe`. Replace `6` with your channel, select **`1` Start**,
+and press **Ctrl+C** to stop. Menu item `8` can turn AMP off before restarting.
+
+`--gain` controls the TX variable-gain stage (`hackrf_transfer -x`). The RF
+amplifier is a separate on/off stage; `--rf-amp` maps to `-a 1`. Its nominal gain
+is about 11 dB and varies with frequency. Digital amplitude scales the normalized
+IQ waveform; `1` uses full scale. These controls do not specify output power in
+dBm, and maximum settings can introduce distortion. The LNA and RX VGA controls
+are receive settings. See the
 [official HackRF gain documentation](https://hackrf.readthedocs.io/en/latest/setting_gain.html).
+
+#### Packet timing and session records
+
+Packet duration must be at least 20 us and rounds up to a 4 us OFDM symbol
+boundary. Gaps are nonnegative and round to sample boundaries. The gap also
+appears between the last packet and the first packet of the next loop. To remove
+inserted gaps, use `--gap-us 0` or set the gap to `0` in menu item `5`; packet
+boundary ramps still apply. The whole loop, including its final gap, must be at
+most 1000 ms, with 1–10000 packets subject to that limit. The default loop is
+55 ms. Increasing packets per loop changes the repeated sequence length, rather
+than the nominal packet rate when packet duration and gap stay fixed.
 
 Other options include `--digital-amplitude`, `--seed`, `--output-dir`, and
 `--verbose`. Use `--help` for all options. Dry-run sessions never access HackRF.
@@ -191,10 +248,20 @@ USB underruns can interrupt delivery, so continuous RF output depends on the
 host and USB connection. These are the project's Wi-Fi-like OFDM packets, not
 IEEE 802.11-compliant traffic that Wi-Fi clients can decode.
 
-Each session saves its resolved configuration and `continuous_summary.json`
-under the output directory. The summary describes host timing and session
-outcome; it does not certify RF delivery or count packets received over the air.
-The temporary repeating IQ file is removed after the child process stops.
+Each start creates a new session directory, including after a stop and restart:
+
+```text
+results/continuous_YYYYMMDD_HHMMSS_microseconds/
+    config.json
+    continuous_summary.json
+```
+
+`config.json` records the selected channel, gain, amplitude, AMP, timing, seed,
+and run mode. The summary describes host timing and session outcome, including
+failures and interrupts; it does not certify RF delivery or count packets
+received over the air. `--output-dir` changes the output location, with relative
+paths resolved from your working directory. The temporary repeating IQ file is
+removed after the child process stops.
 
 ### Missing short bursts on a spectrum analyzer
 
